@@ -1,0 +1,24 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+uv.lock
+
+# Virtual environments
+.venv
+
+#carpetas de trabajo no necesarias
+output/
+output_ocr/
+imagenes_ejemplo/
+pruebas/
+
+#solo el contenido de las carpetas
+images_scaled/*
+output_small/*
+pdf_ejemplo/*
+output_real/*
+output_json/*
