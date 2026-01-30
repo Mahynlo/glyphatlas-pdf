@@ -22,3 +22,6 @@ output_small/*
 pdf_ejemplo/*
 output_real/*
 output_json/*
+
+#ingnorados por ele momento
+modelos/
