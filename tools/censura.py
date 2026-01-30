@@ -7,7 +7,7 @@ from pathlib import Path
 # ===============================
 # CONFIGURACIÓN
 # ===============================
-PDF_ORIGINAL = "Para probar la eficiencia de PaddleOCR 3.pdf"  # PDF original
+PDF_ORIGINAL = "pdf_ejemplo/ejemplo_scan127.pdf"  # PDF original
 JSON_RESULTS = "output_ocr/ocr_results.json"  # JSON con resultados del OCR
 OUTPUT_CENSORED = "output_ocr/documento_censurado.pdf"  # PDF censurado de salida
 
@@ -19,19 +19,37 @@ PALABRAS_A_CENSURAR = [
     "LUIS",
     "valdez",
     "MORALES",
-    "de",
     "oficio",
     "ocr",
     "documento",
-    "para",
     "probar",
+    "liquidacion",
+    "9jkwu",
+    "sociedad4502",
+    "Carlos",
+    "guillermo",
+    "castillo",
+    "velarde",
+    "autoriza",
+    "vence",
+    "oficiq",
+    "jefe",
+    "oficina",
+    "bloq",
+    "9el3a",
+    "recibi",
+    "adscripción"
+    "XXX",
+    "Noxxx",
+    "NO","CASTILLO"
+
     # Agregar más palabras aquí
 ]
 
 # Configuración de censura
 CENSURA_COLOR = (0, 0, 0)  # Negro RGB (puedes cambiar a otro color)
-CENSURA_OPACITY = 1.0  # 1.0 = opaco, 0.5 = semi-transparente
-MARGEN_EXTRA = 1  # Píxeles extra alrededor de la palabra para asegurar cobertura completa
+CENSURA_OPACITY = 1  # 1.0 = opaco, 0.5 = semi-transparente
+MARGEN_EXTRA = 0  # Píxeles extra alrededor de la palabra para asegurar cobertura completa
 
 
 # ===============================

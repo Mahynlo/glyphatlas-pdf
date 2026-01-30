@@ -1,6 +1,7 @@
 """
-Sistema OCR para PDFs con PaddleOCR.
+Sistema OCR para PDFs con PaddleOCR y OnnxTR.
 Detecta automáticamente el tipo de documento y aplica el procesamiento óptimo.
+Motor OCR configurable en config.py: OCR_ENGINE = "paddleocr" o "onnxtr"
 """
 import os
 import time

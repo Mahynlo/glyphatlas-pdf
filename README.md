@@ -19,7 +19,7 @@ Permitir que cualquier editor de PDF pueda "entender" dónde está cada palabra,
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PaddleOCR](https://img.shields.io/badge/PaddleOCR-3.3.3-green.svg)](https://github.com/PaddlePaddle/PaddleOCR)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 
 ---
 
@@ -103,15 +103,15 @@ OCR_paddle/
 
 ### Requisitos
 - Python 3.11+
-- [uv](https://github.com/astral-sh/uv) (gestor de paquetes)
+- [uv](https://docs.astral.sh/uv/) (gestor de paquetes)
 - Windows/Linux/macOS
 
 ### Pasos
 
 ```bash
 # 1. Clonar el repositorio
-git clone <tu-repo>
-cd tu carpeta-destino
+cd tu-carpeta-destino
+git clone https://github.com/Mahynlo/glyphatlas-pdf.git
 
 # 2. Instalar dependencias
 uv sync

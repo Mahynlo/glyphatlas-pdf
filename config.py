@@ -15,10 +15,19 @@ JSON_OUTPUT = "output_ocr/ocr_results.json"  # Resultado consolidado
 # ===============================
 # PARÁMETROS DE OCR
 # ===============================
-MAX_SIDE = 850  # Tamaño máximo para optimización (px)
+# Motor OCR: "paddleocr" (preciso, lento) o "onnxtr" (rápido, ~4s/pág)
+OCR_ENGINE = "onnxtr"  # Cambia a "paddleocr" si necesitas máxima precisión
+
+MAX_SIDE = 1000  # Tamaño máximo para optimización (px)
 CPU_THREADS = 4  # Hilos de CPU para OCR
 MIN_CONFIDENCE = 0.5  # Confianza mínima para aceptar resultados (0.0 - 1.0)
-
+# ===============================
+# UPSCALING DE IMÁGENES PEQUEÑAS
+# ===============================
+ENABLE_UPSCALING = True  # Hacer upscaling si imagen es muy pequeña
+MIN_IMAGE_SIZE = 1000  # Tamaño mínimo (px). Si es menor, se hace upscaling
+UPSCALE_FACTOR = 2.0  # Factor de aumento (2.0 = duplicar tamaño)
+# Usa Lanczos + Sharpening + CLAHE (OpenCV, rápido y efectivo)
 # ===============================
 # DIVISIÓN POR PALABRAS
 # ===============================
@@ -30,8 +39,8 @@ WORD_SPACING_THRESHOLD = 0.1  # Factor para detectar espacios entre palabras (0.
 # ===============================
 GENERATE_VISUALIZATIONS = True  # True = generar imágenes con boxes dibujados
 GENERATE_ANNOTATED_PDF = True   # True = generar PDF con boxes de colores
-GENERATE_SEARCHABLE_PDF = False  # True = generar PDF con texto seleccionable
-GENERATE_EDITABLE_PDF = True    # True = generar PDF con texto editable
+GENERATE_SEARCHABLE_PDF = True  # True = generar PDF con texto seleccionable
+GENERATE_EDITABLE_PDF = False    # True = generar PDF con texto editable
 
 # ===============================
 # LÍMITES DE PROCESAMIENTO

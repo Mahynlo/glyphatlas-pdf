@@ -276,29 +276,54 @@ def create_editable_pdf(original_pdf_path, results_json_path, output_pdf_path):
                     if rect.is_empty or rect.is_infinite:
                         continue
                     
-                    # Calcular tamaño de fuente
+                    # Calcular tamaño de fuente basándose en ancho Y altura del bbox
                     height = y1 - y0
-                    fontsize = max(6, height * 0.7)  # Mínimo 6px
+                    width = x1 - x0
+                    
+                    # Comenzar con tamaño basado en altura
+                    fontsize = max(6, height * 0.8)
+                    fontname = "helv"
+                    
+                    # Ajustar tamaño de fuente para que el texto quepa en el ancho del bbox
+                    # PyMuPDF puede calcular el ancho del texto renderizado
+                    text_length = fitz.get_text_length(text, fontname=fontname, fontsize=fontsize)
+                    
+                    # Si el texto es más ancho que el bbox, reducir el tamaño de fuente
+                    if text_length > width:
+                        # Calcular factor de ajuste basado en la proporción
+                        scale_factor = width / text_length
+                        fontsize = fontsize * scale_factor * 0.95  # 0.95 para dar margen
+                        fontsize = max(4, fontsize)  # Mínimo 4px
+                    
+                    # Verificar nuevamente con el tamaño ajustado
+                    text_length = fitz.get_text_length(text, fontname=fontname, fontsize=fontsize)
+                    
+                    # Si aún no cabe, hacer ajuste fino iterativo
+                    attempts = 0
+                    while text_length > width and fontsize > 4 and attempts < 5:
+                        fontsize *= 0.9
+                        text_length = fitz.get_text_length(text, fontname=fontname, fontsize=fontsize)
+                        attempts += 1
                     
                     # Insertar texto visible y editable
                     rc = page.insert_textbox(
                         rect,
                         text,
                         fontsize=fontsize,
-                        fontname="helv",
+                        fontname=fontname,
                         color=(0, 0, 0),
                         align=fitz.TEXT_ALIGN_LEFT,
                         render_mode=0  # 0 = visible y editable
                     )
                     
-                    # Si el texto no cabe, intentar con fuente más pequeña
-                    if rc < 0:  # rc < 0 significa que no cupo todo el texto
-                        fontsize = max(4, fontsize * 0.8)
+                    # Si aún no cabe (rc < 0), hacer un último intento más agresivo
+                    if rc < 0:
+                        fontsize = max(3, fontsize * 0.7)
                         page.insert_textbox(
                             rect,
                             text,
                             fontsize=fontsize,
-                            fontname="helv",
+                            fontname=fontname,
                             color=(0, 0, 0),
                             align=fitz.TEXT_ALIGN_LEFT,
                             render_mode=0

@@ -1,12 +1,20 @@
 """
-Módulo para el motor OCR con PaddleOCR.
+Módulo para el motor OCR con PaddleOCR y OnnxTR.
+Usa OCR_ENGINE de config.py para seleccionar el motor.
 """
 
 import os
 import time
 import json
-from paddleocr import PaddleOCR
-from config import MAX_SIDE, CPU_THREADS, MIN_CONFIDENCE, OUT_DIR
+from config import MAX_SIDE, CPU_THREADS, MIN_CONFIDENCE, OUT_DIR, OCR_ENGINE
+
+# Imports condicionales según el motor configurado
+if OCR_ENGINE == "onnxtr":
+    from onnxtr.models import ocr_predictor
+    from onnxtr.io import DocumentFile
+    import cv2
+else:
+    from paddleocr import PaddleOCR
 
 
 def log_time(label, start):
@@ -18,39 +26,70 @@ def log_time(label, start):
 
 def init_ocr():
     """
-    Inicializa el motor PaddleOCR con configuración optimizada.
+    Inicializa el motor OCR según OCR_ENGINE en config.py.
     
     Returns:
-        Instancia de PaddleOCR configurada
+        Instancia de PaddleOCR o predictor OnnxTR según configuración
     """
     t0 = time.perf_counter()
     
     try:
-        ocr = PaddleOCR(
-            ocr_version="PP-OCRv5",  # versión de modelo
-            lang="es",  # lenguaje preferido
-            text_detection_model_name="PP-OCRv5_mobile_det",  # modelo de detección
-            text_recognition_model_name="latin_PP-OCRv5_mobile_rec",  # modelo de reconocimiento
-            text_det_limit_side_len=MAX_SIDE,  # límite de longitud
-            cpu_threads=CPU_THREADS, 
-            use_doc_orientation_classify=False,  # orientación
-            use_doc_unwarping=False, 
-            use_textline_orientation=False,
-            enable_mkldnn=True,  # acelera inferencia en CPU
-            # disable_onnxruntime=False  # usa ONNX si está disponible
-        )
-
-        log_time("Inicialización OCR", t0)
-        return ocr
+        if OCR_ENGINE == "onnxtr":
+            print("🚀 Inicializando OnnxTR (motor ONNX optimizado)...")
+            predictor = ocr_predictor(
+                det_arch="db_mobilenet_v3_large",
+                reco_arch="crnn_mobilenet_v3_large",
+                detect_language=False,
+                assume_straight_pages=True,
+                straighten_pages=False,
+                preserve_aspect_ratio=True,
+                symmetric_pad=True
+            )
+            log_time("Inicialización OnnxTR", t0)
+            return predictor
+        else:
+            print("🔧 Inicializando PaddleOCR...")
+            ocr = PaddleOCR(
+                ocr_version="PP-OCRv5",
+                lang="es",
+                text_detection_model_name="PP-OCRv5_mobile_det",
+                text_recognition_model_name="PP-OCRv5_mobile_rec",
+                text_det_limit_side_len=MAX_SIDE,
+                cpu_threads=CPU_THREADS, 
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False, 
+                use_textline_orientation=False,
+                enable_mkldnn=True,
+            )
+            log_time("Inicialización PaddleOCR", t0)
+            return ocr
         
     except Exception as e:
-        print(f"❌ Error inicializando OCR: {e}")
+        print(f"❌ Error inicializando {OCR_ENGINE.upper()}: {e}")
         raise
 
 
 def run_ocr(images, ocr):
     """
-    Ejecuta OCR en todas las imágenes y guarda resultados estructurados.
+    Ejecuta OCR en todas las imágenes usando el motor configurado.
+    
+    Args:
+        images: Lista de diccionarios con info de imágenes
+        ocr: Instancia de PaddleOCR o predictor OnnxTR
+        
+    Returns:
+        Diccionario con todos los resultados del OCR
+    """
+    # Delegar al motor específico
+    if OCR_ENGINE == "onnxtr":
+        return _run_ocr_onnxtr(images, ocr)
+    else:
+        return _run_ocr_paddle(images, ocr)
+
+
+def _run_ocr_paddle(images, ocr):
+    """
+    Ejecuta OCR con PaddleOCR (motor original).
     
     Args:
         images: Lista de diccionarios con info de imágenes
@@ -66,6 +105,7 @@ def run_ocr(images, ocr):
         "metadata": {
             "total_pages": len(images),
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "engine": "PaddleOCR",
             "config": {
                 "max_side": MAX_SIDE,
                 "min_confidence": MIN_CONFIDENCE
@@ -90,6 +130,7 @@ def run_ocr(images, ocr):
                 "page_num": page_num,
                 "image_path": img["path"],
                 "scale": img["scale"],
+                "upscale_factor": img.get("upscale_factor", 1.0),
                 "processing_time": round(page_time, 3),
                 "text_regions": [],
                 "full_text": ""
@@ -133,6 +174,10 @@ def run_ocr(images, ocr):
                         rec_polys = res.get('rec_polys', [])
                         print(f"  ✓ Extraídos {len(rec_texts)} textos desde dict")
                 
+                # Obtener factores de escala
+                scale = img["scale"]
+                upscale_factor = img.get("upscale_factor", 1.0)
+                
                 # Procesar cada región detectada
                 for i in range(len(rec_texts)):
                     text = rec_texts[i]
@@ -147,6 +192,11 @@ def run_ocr(images, ocr):
                                 bbox = poly.tolist()
                             else:
                                 bbox = poly
+                            
+                            # Ajustar coordenadas por upscaling
+                            # Las coordenadas están en imagen procesada, ajustar a PDF original
+                            if upscale_factor != 1.0:
+                                bbox = [[x / upscale_factor, y / upscale_factor] for x, y in bbox]
                         else:
                             bbox = None
                         
@@ -175,6 +225,10 @@ def run_ocr(images, ocr):
                                 poly = rec_polys[i] if i < len(rec_polys) else None
                                 
                                 if confidence >= MIN_CONFIDENCE and poly is not None:
+                                    # Ajustar coordenadas por upscaling
+                                    if upscale_factor != 1.0:
+                                        poly = [[x / upscale_factor, y / upscale_factor] for x, y in poly]
+                                    
                                     page_data["text_regions"].append({
                                         "bbox": poly,
                                         "text": text,
@@ -202,6 +256,132 @@ def run_ocr(images, ocr):
             })
 
     print(f"\n⏱️ OCR total: {ocr_total:.3f} s")
+    
+    # Guardar resultados consolidados
+    save_results(all_results)
+    
+    return all_results
+
+
+def _run_ocr_onnxtr(images, predictor):
+    """
+    Ejecuta OCR con OnnxTR (motor optimizado ONNX).
+    
+    Args:
+        images: Lista de diccionarios con info de imágenes
+        predictor: Predictor OnnxTR
+        
+    Returns:
+        Diccionario con todos los resultados del OCR
+    """
+    from src.utils.io import save_results
+    
+    ocr_total = 0.0
+    all_results = {
+        "metadata": {
+            "total_pages": len(images),
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "engine": "OnnxTR",
+            "config": {
+                "detector": "db_mobilenet_v3_large",
+                "recognizer": "crnn_mobilenet_v3_large",
+                "min_confidence": MIN_CONFIDENCE
+            }
+        },
+        "pages": []
+    }
+    
+    # Cargar todas las imágenes
+    print(f"\n🔍 Procesando {len(images)} página(s) con OnnxTR...")
+    image_arrays = []
+    
+    for img_info in images:
+        img = cv2.imread(img_info['path'])
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        image_arrays.append(img_rgb)
+    
+    # Ejecutar OCR en batch
+    ocr_start = time.perf_counter()
+    result = predictor(image_arrays)
+    ocr_total = log_time("OCR total (batch)", ocr_start)
+    
+    # Procesar cada página
+    for page_idx, (img_info, page_img, page_pred) in enumerate(zip(images, image_arrays, result.pages)):
+        page_num = img_info['page_num']
+        
+        print(f"\n📄 Procesando página {page_num}/{len(images)}")
+        
+        h, w = page_img.shape[:2]
+        scale = img_info.get('scale', 1.0)
+        upscale_factor = img_info.get('upscale_factor', 1.0)
+        
+        text_regions = []
+        full_text_parts = []
+        
+        # Recorrer jerarquía: Bloques -> Líneas -> Palabras
+        for block in page_pred.blocks:
+            for line in block.lines:
+                for word in line.words:
+                    (xmin, ymin), (xmax, ymax) = word.geometry
+                    
+                    # Convertir a píxeles
+                    x0_px = xmin * w
+                    y0_px = ymin * h
+                    x1_px = xmax * w
+                    y1_px = ymax * h
+                    
+                    # Ajustar por upscaling (si se aplicó)
+                    # Las coordenadas están en imagen aumentada, convertir a original
+                    x0_px = x0_px / upscale_factor
+                    y0_px = y0_px / upscale_factor
+                    x1_px = x1_px / upscale_factor
+                    y1_px = y1_px / upscale_factor
+                    
+                    # Aplicar escala inversa para coordenadas finales del PDF
+                    x0 = x0_px / scale
+                    y0 = y0_px / scale
+                    x1 = x1_px / scale
+                    y1 = y1_px / scale
+                    
+                    confidence = word.confidence
+                    text = word.value
+                    
+                    if confidence >= MIN_CONFIDENCE:
+                        # Formato bbox compatible: [[x0,y0], [x1,y0], [x1,y1], [x0,y1]]
+                        bbox = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+                        
+                        text_regions.append({
+                            "bbox": bbox,
+                            "text": text,
+                            "confidence": float(confidence)
+                        })
+                        full_text_parts.append(text)
+        
+        page_data = {
+            "page_num": page_num,
+            "image_path": img_info["path"],
+            "scale": scale,
+            "upscale_factor": upscale_factor,
+            "processing_time": round(ocr_total / len(images), 3),
+            "text_regions": text_regions,
+            "full_text": " ".join(full_text_parts)
+        }
+        
+        all_results["pages"].append(page_data)
+        
+        print(f"✓ Total: {len(text_regions)} región(es) de texto")
+        
+        # Guardar JSON individual
+        page_json = {
+            "page_num": page_num,
+            "text_regions": text_regions
+        }
+        
+        output_path = os.path.join(OUT_DIR, f"page_{page_num}_res.json")
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(page_json, f, ensure_ascii=False, indent=2)
+    
+    print(f"\n⏱️ OCR total: {ocr_total:.3f} s ({ocr_total/len(images):.3f} s/página)")
     
     # Guardar resultados consolidados
     save_results(all_results)
