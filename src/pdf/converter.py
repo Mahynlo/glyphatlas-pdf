@@ -7,7 +7,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 import cv2
 import numpy as np
-from config import MAX_SIDE, IMG_DIR, OUT_ANNOTATED, ENABLE_UPSCALING, MIN_IMAGE_SIZE, UPSCALE_FACTOR
+from config import MAX_SIDE, IMG_DIR, OUT_ANNOTATED, ENABLE_UPSCALING, MIN_IMAGE_SIZE, UPSCALE_FACTOR, RENDER_DPI
 
 
 def log_time(label, start):
@@ -37,7 +37,25 @@ def pdf_to_scaled_images(pdf_path):
         print(f"📖 PDF tiene {total_pages} página(s)")
 
         for i, page in enumerate(doc):
-            pix = page.get_pixmap(matrix=fitz.Matrix(1, 1), alpha=False)
+            # Calcular escala óptima de renderizado basada en DPI configurado
+            # DPI estándar: 150 (rápido), 200 (recomendado), 300 (alta calidad)
+            page_rect = page.rect
+            page_w, page_h = page_rect.width, page_rect.height
+            page_max = max(page_w, page_h)
+            
+            # Calcular render_scale para obtener imagen cercana a MAX_SIDE
+            # Usamos MAX_SIDE * 1.2 para dar margen de calidad antes del resize final
+            target_render_size = MAX_SIDE * 1.2  # px - 20% extra para mejor calidad
+            optimal_render_scale = target_render_size / page_max
+            
+            # Aplicar DPI configurado como escala (DPI/72 = scale)
+            dpi_scale = RENDER_DPI / 72.0
+            
+            # Usar el menor entre optimal y dpi_scale para no crear imágenes innecesariamente grandes
+            final_render_scale = min(optimal_render_scale, dpi_scale)
+            
+            # Renderizar con escala calculada
+            pix = page.get_pixmap(matrix=fitz.Matrix(final_render_scale, final_render_scale), alpha=False)
 
             w, h = pix.width, pix.height
             max_dim = max(w, h)

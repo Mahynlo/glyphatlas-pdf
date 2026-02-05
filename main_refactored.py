@@ -34,6 +34,18 @@ def log_time(label, start):
     print(f"⏱️ {label}: {elapsed:.3f} s")
     return elapsed
 
+def titulo(num_paso):
+    print("\n" + " "*5 +"╔"+ "="*ESPACIADO + "="*(len(num_paso) + 1) + "="*ESPACIADO  + "╗" )
+    print(" "*5 + "║" + " "*ESPACIADO + " "*(len(num_paso)+1) + " "*ESPACIADO  + "║" + " "*5 )
+    print("="*5 + "║" + " "*ESPACIADO + f"{num_paso}" + " "*ESPACIADO  + "║" + "="*5 )
+    print(" "*5 + "║" + " "*ESPACIADO + " "*(len(num_paso)+1) + " "*ESPACIADO  + "║" + " "*5 )
+    print(" "*5 + "╚" + "="*ESPACIADO + "="*(len(num_paso) + 1) + "="*ESPACIADO  + "╝")
+
+
+def sub_titulos(num_paso):
+    print("\n" + " "*5 +"╔"+ "="*ESPACIADO + "="*(len(num_paso) + 1) + "="*ESPACIADO  + "╗" )
+    print("="*5 + "║" + " "*ESPACIADO + f"{num_paso}" + " "*ESPACIADO  + "║" + "="*5 )
+    print(" "*5 + "╚" + "="*ESPACIADO + "="*(len(num_paso) + 1) + "="*ESPACIADO  + "╝")
 
 def main():
     """Función principal de ejecución."""
@@ -84,9 +96,9 @@ def _run_main():
     
     total_start = time.perf_counter()
     
-    print("="*60)
-    print("🚀 SISTEMA OCR CON PADDLEOCR v5")
-    print("="*60)
+    #Titulo de la pp en terminal
+    titulo(TITULO_APP)
+    
     
     # Verificar que existe el PDF
     if not os.path.exists(PDF_PATH):
@@ -98,12 +110,13 @@ def _run_main():
         num_pages, file_size_mb = validate_pdf(PDF_PATH)
         
         print(f"\n📄 Procesando PDF: {PDF_PATH}")
-
+        
+        #paso1_texto="🔍 PASO 1: Detectar tipo de documento"
+        
         # PASO 1: Detectar tipo de PDF
         profiler.stage_start("Detección tipo PDF")
-        print("\n" + "="*60)
-        print("🔍 PASO 1: Detectar tipo de documento")
-        print("="*60)
+        paso1_texto="🔍 PASO 1: Detectar tipo de documento"
+        sub_titulos(paso1_texto)
         pdf_type_info = detect_pdf_type(PDF_PATH)
         pdf_type = pdf_type_info['type']
         profiler.stage_end()
@@ -129,9 +142,11 @@ def _run_main():
         if pdf_type == 'text_only':
             # Solo texto nativo - No necesita OCR
             profiler.stage_start("Extracción texto nativo")
-            print("\n" + "="*60)
-            print("📝 PASO 2: Extraer texto nativo (sin OCR)")
-            print("="*60)
+            
+            paso2_tetxto="📝 PASO 2: Extraer texto nativo (sin OCR)"
+            sub_titulos(paso2_tetxto)
+            
+            
             native_results = extract_native_text_with_boxes(PDF_PATH)
             profiler.stage_end()
             
@@ -206,27 +221,24 @@ def _run_main():
 
 def _process_hybrid_pdf(all_results):
     """Procesa PDFs con texto nativo e imágenes."""
-    print("\n" + "="*60)
-    print("📝 PASO 2A: Extraer texto nativo")
-    print("="*60)
+    paso2A_texto="📝 PASO 2A: Extraer texto nativo"
+    sub_titulos(paso2A_texto)
     native_results = extract_native_text_with_boxes(PDF_PATH)
     
-    print("\n" + "="*60)
-    print("🖼️ PASO 2B: Extraer y procesar imágenes embebidas")
-    print("="*60)
+    paso2B_texto_hybrid="🖼️ PASO 2B: Extraer y procesar imágenes embebidas"
+    sub_titulos(paso2B_texto_hybrid)
     embedded_images = extract_images_from_pdf(PDF_PATH)
     
     ocr_results_by_page = {}
     
     if embedded_images:
-        print("\n" + "="*60)
-        print("🧠 PASO 3: Inicializar motor OCR para imágenes")
-        print("="*60)
+        
+        paso3_texto_hybrid="🧠 PASO 3: Inicializar motor OCR para imágenes"
+        sub_titulos(paso3_texto_hybrid)
         ocr = init_ocr()
         
-        print("\n" + "="*60)
-        print("🔍 PASO 4: Aplicar OCR a imágenes embebidas")
-        print("="*60)
+        paso4_texto_hybrid="🔍 PASO 4: Aplicar OCR a imágenes embebidas"
+        sub_titulos(paso4_texto_hybrid)
         
         ocr_results_by_page = _process_embedded_images(embedded_images, ocr)
     
@@ -252,11 +264,16 @@ def _process_hybrid_pdf(all_results):
 def _process_embedded_images(embedded_images, ocr):
     """Aplica OCR a imágenes embebidas en el PDF."""
     ocr_results_by_page = {}
+
+    print("imagenes:",embedded_images)
     
     for img_info in embedded_images:
         img_path = img_info['image_path']
         page_num = img_info['page_num']
         img_bbox_in_pdf = img_info['bbox']
+
+        print("imagen path: ",img_path)
+
         
         print(f"\n🔍 OCR en imagen de página {page_num}")
         
@@ -266,7 +283,63 @@ def _process_embedded_images(embedded_images, ocr):
             img_width, img_height = img_pil.size
             img_pil.close()
             
-            result = ocr.predict(img_path)
+            # OnnxTR vs PaddleOCR tienen diferentes métodos
+            if OCR_ENGINE == "onnxtr":
+                from onnxtr.io import DocumentFile
+                doc = DocumentFile.from_images(img_path)
+                result = ocr(doc)
+                
+                # Procesar resultado de OnnxTR (diferente a PaddleOCR)
+                if page_num not in ocr_results_by_page:
+                    ocr_results_by_page[page_num] = []
+                
+                print(f"  📐 Imagen: {img_width}x{img_height}px")
+                if img_bbox_in_pdf:
+                    print(f"  📍 Posición en PDF: {img_bbox_in_pdf}")
+                
+                # Extraer resultados de OnnxTR
+                if hasattr(result, 'pages') and result.pages:
+                    page_result = result.pages[0]  # Primera (y única) página
+                    texts_added = 0
+                    
+                    for block in page_result.blocks:
+                        for line in block.lines:
+                            # Obtener texto y confianza
+                            text = " ".join(word.value for word in line.words)
+                            confidence = sum(word.confidence for word in line.words) / len(line.words) if line.words else 0
+                            
+                            if confidence >= MIN_CONFIDENCE:
+                                # Obtener coordenadas del box
+                                # line.geometry es ((x_min, y_min), (x_max, y_max)) normalizado [0,1]
+                                (x_min, y_min), (x_max, y_max) = line.geometry
+                                
+                                # Convertir a coordenadas de píxeles de la imagen
+                                poly = [
+                                    [x_min * img_width, y_min * img_height],
+                                    [x_max * img_width, y_min * img_height],
+                                    [x_max * img_width, y_max * img_height],
+                                    [x_min * img_width, y_max * img_height]
+                                ]
+                                
+                                # Transformar a coordenadas PDF si es necesario
+                                if img_bbox_in_pdf:
+                                    poly = _transform_coords_to_pdf(
+                                        poly, img_bbox_in_pdf, img_width, img_height
+                                    )
+                                
+                                ocr_results_by_page[page_num].append({
+                                    "bbox": poly,
+                                    "text": text,
+                                    "confidence": float(confidence),
+                                    "source": "ocr_from_image"
+                                })
+                                texts_added += 1
+                    
+                    print(f"  ✓ {texts_added} textos detectados y transformados")
+                    
+            else:
+                # PaddleOCR
+                result = ocr.predict(img_path)
             
             if result and isinstance(result, list):
                 for res in result:
@@ -342,24 +415,61 @@ def _transform_coords_to_pdf(poly, img_bbox_in_pdf, img_width, img_height):
 
 def _process_scanned_pdf():
     """Procesa PDFs completamente escaneados."""
-    print("\n" + "="*60)
-    print("📸 PASO 2: Convertir PDF a imágenes")
-    print("="*60)
-    images = pdf_to_scaled_images(PDF_PATH)
+    from src.ocr.engine import run_ocr_direct_pdf
     
-    if not images:
-        print("❌ No se pudieron generar imágenes del PDF")
-        exit(1)
-
-    print("\n" + "="*60)
-    print("🧠 PASO 3: Inicializar motor OCR")
-    print("="*60)
+    # Inicializar motor OCR primero
+    paso3_texto_scaned="🧠 PASO 3: Inicializar motor OCR"
+    sub_titulos(paso3_texto_scaned)
     ocr = init_ocr()
-
-    print("\n" + "="*60)
-    print("🔍 PASO 4: Ejecutar OCR en todas las páginas")
-    print("="*60)
-    ocr_results = run_ocr(images, ocr)
+    
+    # Modo optimizado: pasar PDF directamente a OnnxTR
+    if OCR_ENGINE == "onnxtr":
+        print("\n⚡ Modo optimizado: Procesando PDF directamente con OnnxTR")
+        print("   (sin conversión manual a imágenes, usa pypdfium2 internamente)")
+        
+        paso4_texto_direct="🔍 PASO 4: Ejecutar OCR directo en PDF"
+        sub_titulos(paso4_texto_direct)
+        
+        # Calcular scale óptimo: balance entre DPI configurado y tamaño razonable
+        from config import RENDER_DPI, MAX_SIDE
+        import fitz
+        
+        # Obtener tamaño del PDF
+        pdf_doc = fitz.open(PDF_PATH)
+        first_page = pdf_doc[0]
+        pdf_w, pdf_h = first_page.rect.width, first_page.rect.height
+        pdf_max = max(pdf_w, pdf_h)
+        pdf_doc.close()
+        
+        # Calcular scale basado en DPI
+        dpi_scale = RENDER_DPI / 72.0
+        
+        # Calcular scale que daría MAX_SIDE * 1.5 (suficiente para OCR)
+        target_size = MAX_SIDE * 1.5  # 1500px es suficiente para buena calidad
+        optimal_scale = target_size / pdf_max
+        
+        # Usar el menor entre ambos para no crear imágenes innecesariamente grandes
+        render_scale = min(dpi_scale, optimal_scale)
+        
+        # Limitar entre 1.2-2.0 para mejor velocidad
+        render_scale = max(1.2, min(2.0, render_scale))
+        
+        ocr_results = run_ocr_direct_pdf(PDF_PATH, ocr, scale=render_scale)
+        images = []  # No hay imágenes guardadas en modo directo
+        
+    else:
+        # PaddleOCR: convertir a imágenes primero
+        paso2_texto_scaned="📸 PASO 2: Convertir PDF a imágenes"
+        sub_titulos(paso2_texto_scaned)
+        images = pdf_to_scaled_images(PDF_PATH)
+        
+        if not images:
+            print("❌ No se pudieron generar imágenes del PDF")
+            exit(1)
+        
+        paso4_texto_scaned="🔍 PASO 4: Ejecutar OCR en todas las páginas"
+        sub_titulos(paso4_texto_scaned)
+        ocr_results = run_ocr(images, ocr)
     
     return images, ocr_results
 
@@ -373,14 +483,14 @@ def _generate_visualizations(pdf_type, images, all_results):
         return
     
     if pdf_type == 'scanned' and images:
-        print("\n" + "="*60)
-        print("🎨 Generar imágenes anotadas en resolución original")
-        print("="*60)
+        
+        generar_vis="🎨 Generar imágenes anotadas en resolución original"
+        sub_titulos(generar_vis)
         draw_boxes_original_scale(images, all_results)
     elif pdf_type in ['text_only', 'text_and_images']:
-        print("\n" + "="*60)
-        print("🎨 Generar visualización del texto nativo")
-        print("="*60)
+        
+        generar_vis_nat="🎨 Generar visualización del texto nativo"
+        sub_titulos(generar_vis_nat)
         draw_native_text_boxes(PDF_PATH, all_results)
 
 
@@ -393,9 +503,9 @@ def _generate_enhanced_pdfs():
         print("\n⏭️ Generación de PDFs mejorados deshabilitada")
         return
     
-    print("\n" + "="*60)
-    print("📄 GENERANDO PDFs MEJORADOS")
-    print("="*60)
+    
+    pdf_mejorado="📄 GENERANDO PDFs MEJORADOS"
+    sub_titulos(pdf_mejorado)
     
     # 1. PDF con anotaciones de colores
     if GENERATE_ANNOTATED_PDF:

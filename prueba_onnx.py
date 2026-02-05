@@ -13,7 +13,7 @@ from onnxtr.models import ocr_predictor
 print("📂 Cargando documento y modelo...")
 
 # Ruta de tu archivo local
-pdf_path = "pdf_ejemplo/ejemplo_scan127.pdf"
+pdf_path = "pdf_ejemplo/searchable_document.pdf"
 
 # Validación rápida: Si el archivo no existe, avisamos
 if not os.path.exists(pdf_path):

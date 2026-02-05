@@ -2,14 +2,78 @@ import os
 import json
 import fitz  # PyMuPDF
 import re
+import unicodedata
 from pathlib import Path
+import sys
+
+# Importar configuración compartida del proyecto
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import PDF_PATH, OUT_DIR
+
+
+# ===============================
+# UTILIDADES DE NORMALIZACIÓN
+# ===============================
+def normalizar_texto(texto):
+    """
+    Normaliza texto para búsqueda:
+    - Quita acentos
+    - Convierte a minúsculas
+    - Mantiene espacios y puntuación básica
+    
+    Args:
+        texto: Texto a normalizar
+        
+    Returns:
+        Texto normalizado
+    """
+    # Convertir a minúsculas
+    texto = texto.lower()
+    
+    # Quitar acentos (NFD = descomponer, luego filtrar)
+    texto_nfd = unicodedata.normalize('NFD', texto)
+    texto_sin_acentos = ''.join(
+        char for char in texto_nfd 
+        if unicodedata.category(char) != 'Mn'  # Mn = Marca no espaciadora (acentos)
+    )
+    
+    return texto_sin_acentos
+
+
+def generar_variantes_pegadas(frase):
+    """
+    Genera variantes de una frase con palabras potencialmente pegadas.
+    Ejemplo: "hola mundo" → ["holamundo", "hola mundo", "ho lamundo", ...]
+    
+    Args:
+        frase: Frase original
+        
+    Returns:
+        Lista de variantes posibles
+    """
+    palabras = frase.split()
+    variantes = [frase]  # Incluir original
+    
+    if len(palabras) > 1:
+        # Variante completamente pegada
+        variantes.append(''.join(palabras))
+        
+        # Variantes con combinaciones parciales (máximo 2 palabras juntas)
+        for i in range(len(palabras) - 1):
+            variante = palabras.copy()
+            variante[i] = variante[i] + variante[i + 1]
+            del variante[i + 1]
+            variantes.append(' '.join(variante))
+    
+    return list(set(variantes))  # Eliminar duplicados
 
 # ===============================
 # CONFIGURACIÓN
 # ===============================
-PDF_ORIGINAL = "pdf_ejemplo/ejemplo_scan127.pdf"  # PDF original
-JSON_RESULTS = "output_ocr/ocr_results.json"  # JSON con resultados del OCR
-OUTPUT_CENSORED = "output_ocr/documento_censurado.pdf"  # PDF censurado de salida
+# Usar el mismo PDF que está configurado en config.py (PDF_PATH)
+PDF_ORIGINAL = PDF_PATH
+JSON_RESULTS = f"{OUT_DIR}/ocr_results.json"  # JSON con resultados del OCR
+OUTPUT_CENSORED = f"{OUT_DIR}/documento_censurado.pdf"  # PDF censurado de salida
 
 # Lista de palabras o frases a censurar (case insensitive)
 PALABRAS_A_CENSURAR = [
@@ -41,7 +105,9 @@ PALABRAS_A_CENSURAR = [
     "adscripción"
     "XXX",
     "Noxxx",
-    "NO","CASTILLO"
+    "NO",
+    "CASTILLO",
+    "valdezi"
 
     # Agregar más palabras aquí
 ]
@@ -53,11 +119,17 @@ MARGEN_EXTRA = 0  # Píxeles extra alrededor de la palabra para asegurar cobertu
 
 
 # ===============================
-# 🔍 Buscar palabras en resultados
+# 🔍 Buscar palabras en resultados (MEJORADO)
 # ===============================
 def buscar_palabras_a_censurar(results_data, palabras_objetivo):
     """
-    Busca palabras específicas en los resultados del OCR.
+    Busca palabras/frases específicas en los resultados del OCR.
+    
+    Características:
+    - Insensible a mayúsculas/minúsculas
+    - Ignora acentos
+    - Detecta palabras pegadas sin espacios
+    - Soporta frases completas
     
     Args:
         results_data: Diccionario con resultados del JSON
@@ -67,9 +139,20 @@ def buscar_palabras_a_censurar(results_data, palabras_objetivo):
         Dict con boxes a censurar por página
     """
     print("\n🔍 Buscando palabras a censurar...")
+    print(f"   📝 Búsqueda: insensible a mayúsculas, acentos y espacios")
     
     boxes_a_censurar = {}  # {page_num: [boxes]}
-    palabras_lower = [p.lower() for p in palabras_objetivo]
+    
+    # Normalizar palabras objetivo y generar variantes
+    palabras_normalizadas = []
+    for palabra in palabras_objetivo:
+        palabra_norm = normalizar_texto(palabra)
+        variantes = generar_variantes_pegadas(palabra_norm)
+        palabras_normalizadas.append({
+            'original': palabra,
+            'normalizada': palabra_norm,
+            'variantes': variantes
+        })
     
     for page_data in results_data.get('pages', []):
         page_num = page_data['page_num']
@@ -84,25 +167,49 @@ def buscar_palabras_a_censurar(results_data, palabras_objetivo):
             if not text or not bbox:
                 continue
             
-            # Buscar coincidencias (case insensitive)
-            text_lower = text.lower()
+            # Normalizar texto del OCR
+            text_normalizado = normalizar_texto(text)
             
-            for palabra_objetivo in palabras_objetivo:
-                palabra_lower = palabra_objetivo.lower()
+            # Buscar coincidencias con todas las variantes
+            for palabra_info in palabras_normalizadas:
+                encontrada = False
+                variante_encontrada = None
                 
-                # Búsqueda exacta de palabra completa o frase
-                if palabra_lower in text_lower:
-                    # Verificar si es palabra completa o parte de frase
-                    pattern = r'\b' + re.escape(palabra_lower) + r'\b'
-                    if re.search(pattern, text_lower):
-                        page_boxes.append({
-                            'bbox': bbox,
-                            'text': text,
-                            'palabra_encontrada': palabra_objetivo,
-                            'coincidencia_exacta': text_lower == palabra_lower
-                        })
-                        print(f"  ✓ Página {page_num}: '{text}' → contiene '{palabra_objetivo}'")
-                        break  # Evitar duplicados
+                # Probar con cada variante (pegada, con espacios, etc.)
+                for variante in palabra_info['variantes']:
+                    # Búsqueda flexible: puede ser parte del texto
+                    if variante in text_normalizado:
+                        # Palabras muy cortas (<=2 caracteres): solo coincidencia exacta completa
+                        if len(variante) <= 2:
+                            # Requiere que sea exactamente igual (evita "No," coincida con "NO")
+                            if text_normalizado == variante:
+                                encontrada = True
+                                variante_encontrada = variante
+                                break
+                        # Verificar si es palabra completa o frase
+                        elif ' ' in variante or len(variante.split()) == 1:
+                            # Frase o palabra única: buscar límites de palabra
+                            pattern = r'\b' + re.escape(variante) + r'\b'
+                            if re.search(pattern, text_normalizado):
+                                encontrada = True
+                                variante_encontrada = variante
+                                break
+                        else:
+                            # Palabra pegada: buscar directamente
+                            encontrada = True
+                            variante_encontrada = variante
+                            break
+                
+                if encontrada:
+                    page_boxes.append({
+                        'bbox': bbox,
+                        'text': text,
+                        'palabra_encontrada': palabra_info['original'],
+                        'variante_match': variante_encontrada,
+                        'texto_normalizado': text_normalizado
+                    })
+                    print(f"  ✓ Página {page_num}: '{text}' → contiene '{palabra_info['original']}' (match: '{variante_encontrada}')")
+                    break  # Evitar duplicados para esta región
         
         if page_boxes:
             boxes_a_censurar[page_num] = page_boxes
@@ -132,9 +239,17 @@ def aplicar_censura(pdf_path, boxes_por_pagina, output_path):
     
     try:
         doc = fitz.open(pdf_path)
+        num_pages_pdf = len(doc)
+        print(f"   📄 PDF tiene {num_pages_pdf} página(s)")
+        
         total_censuras = 0
         
         for page_num, boxes in boxes_por_pagina.items():
+            # Validar que la página existe en el PDF
+            if page_num > num_pages_pdf:
+                print(f"  ⚠️ Página {page_num} no existe en PDF (solo tiene {num_pages_pdf} páginas) - omitida")
+                continue
+            
             page = doc[page_num - 1]
             
             for box_info in boxes:

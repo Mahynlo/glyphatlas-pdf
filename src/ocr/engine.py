@@ -36,14 +36,18 @@ def init_ocr():
     try:
         if OCR_ENGINE == "onnxtr":
             print("🚀 Inicializando OnnxTR (motor ONNX optimizado)...")
+            
+            # Configuración optimizada: balance velocidad/calidad
             predictor = ocr_predictor(
                 det_arch="db_mobilenet_v3_large",
-                reco_arch="crnn_mobilenet_v3_large",
+                reco_arch="crnn_mobilenet_v3_small",
                 detect_language=False,
                 assume_straight_pages=True,
                 straighten_pages=False,
                 preserve_aspect_ratio=True,
-                symmetric_pad=True
+                symmetric_pad=False,  # Desactivado para velocidad
+                
+                load_in_8_bit=False
             )
             log_time("Inicialización OnnxTR", t0)
             return predictor
@@ -85,6 +89,136 @@ def run_ocr(images, ocr):
         return _run_ocr_onnxtr(images, ocr)
     else:
         return _run_ocr_paddle(images, ocr)
+
+
+def run_ocr_direct_pdf(pdf_path, ocr, scale=2.0):
+    """
+    Ejecuta OCR directamente en un PDF usando OnnxTR.from_pdf().
+    Más rápido que convertir a imágenes manualmente (usa pypdfium2).
+    
+    Solo funciona con OnnxTR. Para PDFs escaneados completos.
+    
+    Args:
+        pdf_path: Ruta al archivo PDF
+        ocr: Predictor OnnxTR
+        scale: Factor de escala de renderizado (1.0=72dpi, 2.0=144dpi, 3.0=216dpi)
+        
+    Returns:
+        Diccionario con todos los resultados del OCR
+    """
+    if OCR_ENGINE != "onnxtr":
+        raise ValueError("run_ocr_direct_pdf solo funciona con OCR_ENGINE='onnxtr'")
+    
+    import fitz  # Para obtener dimensiones originales del PDF
+    from onnxtr.io import DocumentFile
+    import numpy as np
+    
+    t0 = time.perf_counter()
+    
+    # Calcular DPI equivalente para mostrar
+    dpi_equivalent = int(72 * scale)
+    
+    # Cargar PDF directamente (usa pypdfium2 internamente)
+    print(f"\n📄 Cargando PDF con DocumentFile (scale={scale:.1f}, ~{dpi_equivalent} DPI)...")
+    doc_images = DocumentFile.from_pdf(pdf_path, scale=scale)
+    num_pages = len(doc_images)
+    print(f"✅ PDF cargado: {num_pages} página(s)")
+    
+    # Ejecutar OCR en batch (más rápido)
+    print(f"\n🔍 Procesando {num_pages} página(s) con OnnxTR...")
+    batch_start = time.perf_counter()
+    result = ocr(doc_images)
+    log_time("OCR total (batch)", batch_start)
+    
+    # Obtener dimensiones originales del PDF para coordenadas precisas
+    pdf_doc = fitz.open(pdf_path)
+    
+    all_results = {
+        "pages": [],
+        "metadata": {
+            "ocr_engine": "onnxtr",
+            "processing_mode": "direct_pdf",
+            "scale": scale,
+            "dpi_equivalent": dpi_equivalent,
+            "min_confidence": MIN_CONFIDENCE
+        }
+    }
+    
+    # Procesar resultados por página
+    for page_idx, (page_result, page_img) in enumerate(zip(result.pages, doc_images)):
+        page_num = page_idx + 1
+        print(f"\n📄 Procesando página {page_num}/{num_pages}")
+        
+        # Obtener dimensiones de la imagen renderizada
+        img_h, img_w = page_img.shape[:2]
+        
+        # Obtener dimensiones originales del PDF
+        pdf_page = pdf_doc[page_idx]
+        pdf_w = pdf_page.rect.width
+        pdf_h = pdf_page.rect.height
+        
+        # Factor de escala: imagen_renderizada / PDF_original
+        scale_x = img_w / pdf_w
+        scale_y = img_h / pdf_h
+        
+        text_regions = []
+        full_text_parts = []
+        
+        # Iterar sobre bloques -> líneas -> palabras
+        for block in page_result.blocks:
+            for line in block.lines:
+                for word in line.words:
+                    # Coordenadas normalizadas (0.0 a 1.0)
+                    (xmin, ymin), (xmax, ymax) = word.geometry
+                    
+                    # Convertir a coordenadas de PDF original
+                    # Paso 1: De normalizado a píxeles de imagen renderizada
+                    x0_img = xmin * img_w
+                    y0_img = ymin * img_h
+                    x1_img = xmax * img_w
+                    y1_img = ymax * img_h
+                    
+                    # Paso 2: De imagen renderizada a espacio PDF original
+                    x0 = x0_img / scale_x
+                    y0 = y0_img / scale_y
+                    x1 = x1_img / scale_x
+                    y1 = y1_img / scale_y
+                    
+                    confidence = word.confidence
+                    text = word.value
+                    
+                    if confidence >= MIN_CONFIDENCE:
+                        # Formato bbox compatible: [[x0,y0], [x1,y0], [x1,y1], [x0,y1]]
+                        bbox = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+                        
+                        text_regions.append({
+                            "bbox": bbox,
+                            "text": text,
+                            "confidence": float(confidence)
+                        })
+                        full_text_parts.append(text)
+        
+        page_data = {
+            "page_num": page_num,
+            "text_regions": text_regions,
+            "full_text": " ".join(full_text_parts),
+            "processing_method": "onnxtr_direct_pdf",
+            "scale": 1.0,  # Ya está en coordenadas PDF originales
+            "render_scale": scale,
+            "img_size": (img_w, img_h),
+            "pdf_size": (pdf_w, pdf_h)
+        }
+        
+        all_results["pages"].append(page_data)
+        print(f"✓ Total: {len(text_regions)} región(es) de texto")
+    
+    pdf_doc.close()
+    
+    total_time = time.perf_counter() - t0
+    avg_time = total_time / num_pages if num_pages > 0 else 0
+    print(f"\n⏱️ OCR total: {total_time:.3f} s ({avg_time:.3f} s/página)")
+    
+    return all_results
 
 
 def _run_ocr_paddle(images, ocr):
